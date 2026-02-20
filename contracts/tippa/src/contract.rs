@@ -70,7 +70,7 @@ impl CascadingDonations {
     ) -> Result<(), Error> {
         caller.require_auth();
         Self::assert_owner(&env, &caller, &project_id)?;
-        Self::validate_rules(&rules, &project_id)?;
+        Self::validate_rules(&env, &rules, &project_id)?;
 
         let rules_key = DataKey::Rules(project_id.clone());
         env.storage().persistent().set(&rules_key, &rules);
@@ -134,8 +134,11 @@ impl CascadingDonations {
         Ok(())
     }
 
-    pub fn distribute(env: Env, project_id: String, asset: Address) -> Result<(), Error> {
-        Self::distribute_internal(&env, &project_id, &asset)
+    /// `min_distribution`: smallest amount worth forwarding (in token stroops).
+    /// Shares below this threshold stay with the owner instead of cascading.
+    /// Pass 0 to disable the threshold.
+    pub fn distribute(env: Env, project_id: String, asset: Address, min_distribution: i128) -> Result<(), Error> {
+        Self::distribute_internal(&env, &project_id, &asset, min_distribution)
     }
 
     pub fn claim(
@@ -156,11 +159,12 @@ impl CascadingDonations {
         project_id: String,
         asset: Address,
         to: Option<Address>,
+        min_distribution: i128,
     ) -> Result<i128, Error> {
         caller.require_auth();
         Self::assert_owner(&env, &caller, &project_id)?;
 
-        Self::distribute_internal(&env, &project_id, &asset)?;
+        Self::distribute_internal(&env, &project_id, &asset, min_distribution)?;
 
         let unclaimed_key = DataKey::Unclaimed(project_id.clone(), asset.clone());
         let unclaimed: i128 = env
@@ -306,6 +310,7 @@ impl CascadingDonations {
         env: &Env,
         project_id: &String,
         asset: &Address,
+        min_distribution: i128,
     ) -> Result<(), Error> {
         if !env
             .storage()
@@ -336,7 +341,7 @@ impl CascadingDonations {
             let pct = rules.get(recipient.clone()).unwrap() as i128;
             let share = pool * pct / (BPS_BASE as i128);
 
-            if share == 0 {
+            if share < min_distribution {
                 continue;
             }
             total_shared += share;
@@ -415,7 +420,7 @@ impl CascadingDonations {
         Ok(())
     }
 
-    fn validate_rules(rules: &Map<String, u32>, own_project: &String) -> Result<(), Error> {
+    fn validate_rules(env: &Env, rules: &Map<String, u32>, own_project: &String) -> Result<(), Error> {
         if rules.len() > MAX_RULES {
             return Err(Error::TooManyRules);
         }
@@ -428,6 +433,10 @@ impl CascadingDonations {
 
             if key == *own_project {
                 return Err(Error::SelfReference);
+            }
+
+            if !env.storage().persistent().has(&DataKey::Owner(key.clone())) {
+                return Err(Error::RecipientNotRegistered);
             }
 
             let pct = rules.get(key).unwrap();

@@ -15,4 +15,5 @@ pub enum Error {
     InvalidAmount        = 9,
     ProjectAlreadyExists = 10,
     RulesNotSet          = 11,
+    RecipientNotRegistered = 12,
 }

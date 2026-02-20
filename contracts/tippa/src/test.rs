@@ -61,6 +61,7 @@ fn test_set_rules() {
     let dep = str(&env, "deps/cool-lib");
 
     c.register_project(&owner, &pid);
+    c.register_project(&Address::generate(&env), &dep);
 
     let mut rules = Map::new(&env);
     rules.set(dep.clone(), 3000u32); // 30% in BPS
@@ -79,10 +80,28 @@ fn test_rules_exceed_100_fails() {
     let pid = str(&env, "acme/my-lib");
     c.register_project(&owner, &pid);
 
+    // Recipients must be registered before they can appear in rules
+    c.register_project(&Address::generate(&env), &str(&env, "a/b"));
+    c.register_project(&Address::generate(&env), &str(&env, "c/d"));
+
     let mut rules = Map::new(&env);
     rules.set(str(&env, "a/b"), 6000u32); // 60% in BPS
     rules.set(str(&env, "c/d"), 6000u32); // 60% — total 120%, exceeds max
     c.set_rules(&owner, &pid, &rules);
+}
+
+#[test]
+#[should_panic]
+fn test_rules_unregistered_recipient_fails() {
+    let (env, cid, _tok) = setup();
+    let c = client(&env, &cid);
+    let owner = Address::generate(&env);
+    let pid = str(&env, "acme/my-lib");
+    c.register_project(&owner, &pid);
+
+    let mut rules = Map::new(&env);
+    rules.set(str(&env, "not/registered"), 3000u32);
+    c.set_rules(&owner, &pid, &rules); // recipient not registered
 }
 
 #[test]
@@ -117,7 +136,7 @@ fn test_distribute_no_rules_all_unclaimed() {
     mint(&env, &tok, &donor, 1_000);
     c.donate(&donor, &pid, &tok, &1_000, &None);
 
-    c.distribute(&pid, &tok);
+    c.distribute(&pid, &tok, &0);
 
     assert_eq!(c.get_pool(&pid, &tok), 0);
     assert_eq!(c.get_unclaimed(&pid, &tok), 1_000);
@@ -143,7 +162,7 @@ fn test_distribute_with_cascade() {
     mint(&env, &tok, &donor, 1_000);
     c.donate(&donor, &pid1, &tok, &1_000, &None);
 
-    c.distribute(&pid1, &tok);
+    c.distribute(&pid1, &tok, &0);
 
     assert_eq!(c.get_pool(&pid1, &tok), 0);
     assert_eq!(c.get_unclaimed(&pid1, &tok), 600);
@@ -164,7 +183,7 @@ fn test_claim() {
     c.register_project(&owner, &pid);
     mint(&env, &tok, &donor, 1_000);
     c.donate(&donor, &pid, &tok, &1_000, &None);
-    c.distribute(&pid, &tok);
+    c.distribute(&pid, &tok, &0);
 
     let paid = c.claim(&owner, &pid, &tok, &None);
     assert_eq!(paid, 1_000);
@@ -187,10 +206,42 @@ fn test_distribute_and_claim() {
     mint(&env, &tok, &donor, 500);
     c.donate(&donor, &pid, &tok, &500, &None);
 
-    let paid = c.distribute_and_claim(&owner, &pid, &tok, &None);
+    let paid = c.distribute_and_claim(&owner, &pid, &tok, &None, &0);
     assert_eq!(paid, 500);
     assert_eq!(c.get_pool(&pid, &tok), 0);
     assert_eq!(c.get_unclaimed(&pid, &tok), 0);
+}
+
+#[test]
+fn test_min_distribution_skips_dust() {
+    let (env, cid, tok) = setup();
+    let c = client(&env, &cid);
+    let owner1 = Address::generate(&env);
+    let owner2 = Address::generate(&env);
+    let donor = Address::generate(&env);
+    let pid1 = str(&env, "acme/parent");
+    let pid2 = str(&env, "deps/child");
+
+    c.register_project(&owner1, &pid1);
+    c.register_project(&owner2, &pid2);
+
+    // Parent forwards 40% to child
+    let mut rules = Map::new(&env);
+    rules.set(pid2.clone(), 4000u32); // 40% in BPS
+    c.set_rules(&owner1, &pid1, &rules);
+
+    // Donate 100 to parent
+    mint(&env, &tok, &donor, 100);
+    c.donate(&donor, &pid1, &tok, &100, &None);
+
+    // Distribute with min_distribution = 50
+    // 40% of 100 = 40, which is below 50, so child gets nothing
+    c.distribute(&pid1, &tok, &50);
+
+    // Child's pool should be 0 (share was below threshold)
+    assert_eq!(c.get_pool(&pid2, &tok), 0);
+    // Owner keeps everything (100 instead of 60)
+    assert_eq!(c.get_unclaimed(&pid1, &tok), 100);
 }
 
 #[test]
