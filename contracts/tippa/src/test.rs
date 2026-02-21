@@ -30,14 +30,14 @@ fn str(env: &Env, s: &str) -> String {
 }
 
 #[test]
-fn test_register_project() {
+fn test_register() {
     let (env, cid, _tok) = setup();
     let c = client(&env, &cid);
     let owner = Address::generate(&env);
-    let pid = str(&env, "acme/my-lib");
+    let username = str(&env, "alice");
 
-    c.register_project(&owner, &pid);
-    assert_eq!(c.get_owner(&pid), Some(owner));
+    c.register(&owner, &username);
+    assert_eq!(c.get_owner(&username), Some(owner));
 }
 
 #[test]
@@ -46,10 +46,10 @@ fn test_register_duplicate_fails() {
     let (env, cid, _tok) = setup();
     let c = client(&env, &cid);
     let owner = Address::generate(&env);
-    let pid = str(&env, "acme/my-lib");
+    let username = str(&env, "alice");
 
-    c.register_project(&owner, &pid);
-    c.register_project(&owner, &pid);
+    c.register(&owner, &username);
+    c.register(&owner, &username);
 }
 
 #[test]
@@ -57,37 +57,36 @@ fn test_set_rules() {
     let (env, cid, _tok) = setup();
     let c = client(&env, &cid);
     let owner = Address::generate(&env);
-    let pid = str(&env, "acme/my-lib");
-    let dep = str(&env, "deps/cool-lib");
+    let username = str(&env, "alice");
+    let dep = str(&env, "bob");
 
-    c.register_project(&owner, &pid);
-    c.register_project(&Address::generate(&env), &dep);
+    c.register(&owner, &username);
+    c.register(&Address::generate(&env), &dep);
 
     let mut rules = Map::new(&env);
     rules.set(dep.clone(), 3000u32); // 30% in BPS
-    c.set_rules(&owner, &pid, &rules);
+    c.set_rules(&owner, &username, &rules);
 
-    let stored = c.get_rules(&pid);
+    let stored = c.get_rules(&username);
     assert_eq!(stored.get(dep).unwrap(), 3000);
 }
 
 #[test]
 #[should_panic]
-fn test_rules_exceed_100_fails() {
+fn test_rules_exceed_max_fails() {
     let (env, cid, _tok) = setup();
     let c = client(&env, &cid);
     let owner = Address::generate(&env);
-    let pid = str(&env, "acme/my-lib");
-    c.register_project(&owner, &pid);
+    let username = str(&env, "alice");
+    c.register(&owner, &username);
 
-    // Recipients must be registered before they can appear in rules
-    c.register_project(&Address::generate(&env), &str(&env, "a/b"));
-    c.register_project(&Address::generate(&env), &str(&env, "c/d"));
+    c.register(&Address::generate(&env), &str(&env, "bob"));
+    c.register(&Address::generate(&env), &str(&env, "carol"));
 
     let mut rules = Map::new(&env);
-    rules.set(str(&env, "a/b"), 6000u32); // 60% in BPS
-    rules.set(str(&env, "c/d"), 6000u32); // 60% — total 120%, exceeds max
-    c.set_rules(&owner, &pid, &rules);
+    rules.set(str(&env, "bob"), 6000u32);   // 60% in BPS
+    rules.set(str(&env, "carol"), 6000u32); // 60% — total 120%, exceeds max
+    c.set_rules(&owner, &username, &rules);
 }
 
 #[test]
@@ -96,12 +95,12 @@ fn test_rules_unregistered_recipient_fails() {
     let (env, cid, _tok) = setup();
     let c = client(&env, &cid);
     let owner = Address::generate(&env);
-    let pid = str(&env, "acme/my-lib");
-    c.register_project(&owner, &pid);
+    let username = str(&env, "alice");
+    c.register(&owner, &username);
 
     let mut rules = Map::new(&env);
-    rules.set(str(&env, "not/registered"), 3000u32);
-    c.set_rules(&owner, &pid, &rules); // recipient not registered
+    rules.set(str(&env, "not_registered"), 3000u32);
+    c.set_rules(&owner, &username, &rules);
 }
 
 #[test]
@@ -110,16 +109,16 @@ fn test_donate() {
     let c = client(&env, &cid);
     let owner = Address::generate(&env);
     let donor = Address::generate(&env);
-    let pid = str(&env, "acme/my-lib");
+    let username = str(&env, "alice");
 
-    c.register_project(&owner, &pid);
+    c.register(&owner, &username);
     mint(&env, &tok, &donor, 1_000);
 
-    c.donate(&donor, &pid, &tok, &1_000, &None);
+    c.donate(&donor, &username, &tok, &1_000, &None);
 
-    assert_eq!(c.get_pool(&pid, &tok), 1_000);
-    assert_eq!(c.get_total_received(&pid, &tok), 1_000);
-    assert_eq!(c.get_donor_to_project(&donor, &pid, &tok), 1_000);
+    assert_eq!(c.get_pool(&username, &tok), 1_000);
+    assert_eq!(c.get_total_received(&username, &tok), 1_000);
+    assert_eq!(c.get_donor_to_user(&donor, &username, &tok), 1_000);
     assert_eq!(c.get_donor_total(&donor, &tok), 1_000);
     assert_eq!(c.get_grand_total(&tok), 1_000);
 }
@@ -130,16 +129,16 @@ fn test_distribute_no_rules_all_unclaimed() {
     let c = client(&env, &cid);
     let owner = Address::generate(&env);
     let donor = Address::generate(&env);
-    let pid = str(&env, "acme/my-lib");
+    let username = str(&env, "alice");
 
-    c.register_project(&owner, &pid);
+    c.register(&owner, &username);
     mint(&env, &tok, &donor, 1_000);
-    c.donate(&donor, &pid, &tok, &1_000, &None);
+    c.donate(&donor, &username, &tok, &1_000, &None);
 
-    c.distribute(&pid, &tok, &0);
+    c.distribute(&username, &tok, &0);
 
-    assert_eq!(c.get_pool(&pid, &tok), 0);
-    assert_eq!(c.get_unclaimed(&pid, &tok), 1_000);
+    assert_eq!(c.get_pool(&username, &tok), 0);
+    assert_eq!(c.get_unclaimed(&username, &tok), 1_000);
 }
 
 #[test]
@@ -149,27 +148,27 @@ fn test_distribute_with_cascade() {
     let owner1 = Address::generate(&env);
     let owner2 = Address::generate(&env);
     let donor  = Address::generate(&env);
-    let pid1 = str(&env, "acme/parent");
-    let pid2 = str(&env, "deps/child");
+    let user1 = str(&env, "alice");
+    let user2 = str(&env, "bob");
 
-    c.register_project(&owner1, &pid1);
-    c.register_project(&owner2, &pid2);
+    c.register(&owner1, &user1);
+    c.register(&owner2, &user2);
 
     let mut rules = Map::new(&env);
-    rules.set(pid2.clone(), 4000u32); // 40% in BPS
-    c.set_rules(&owner1, &pid1, &rules);
+    rules.set(user2.clone(), 4000u32); // 40% in BPS
+    c.set_rules(&owner1, &user1, &rules);
 
     mint(&env, &tok, &donor, 1_000);
-    c.donate(&donor, &pid1, &tok, &1_000, &None);
+    c.donate(&donor, &user1, &tok, &1_000, &None);
 
-    c.distribute(&pid1, &tok, &0);
+    c.distribute(&user1, &tok, &0);
 
-    assert_eq!(c.get_pool(&pid1, &tok), 0);
-    assert_eq!(c.get_unclaimed(&pid1, &tok), 600);
+    assert_eq!(c.get_pool(&user1, &tok), 0);
+    assert_eq!(c.get_unclaimed(&user1, &tok), 600);
 
-    assert_eq!(c.get_pool(&pid2, &tok), 400);
-    assert_eq!(c.get_total_received(&pid2, &tok), 400);
-    assert_eq!(c.get_total_received_from_projects(&pid2, &tok), 400);
+    assert_eq!(c.get_pool(&user2, &tok), 400);
+    assert_eq!(c.get_total_received(&user2, &tok), 400);
+    assert_eq!(c.get_total_received_from_others(&user2, &tok), 400);
 }
 
 #[test]
@@ -178,19 +177,19 @@ fn test_claim() {
     let c = client(&env, &cid);
     let owner = Address::generate(&env);
     let donor = Address::generate(&env);
-    let pid   = str(&env, "acme/my-lib");
+    let username = str(&env, "alice");
 
-    c.register_project(&owner, &pid);
+    c.register(&owner, &username);
     mint(&env, &tok, &donor, 1_000);
-    c.donate(&donor, &pid, &tok, &1_000, &None);
-    c.distribute(&pid, &tok, &0);
+    c.donate(&donor, &username, &tok, &1_000, &None);
+    c.distribute(&username, &tok, &0);
 
-    let paid = c.claim(&owner, &pid, &tok, &None);
+    let paid = c.claim(&owner, &username, &tok, &None);
     assert_eq!(paid, 1_000);
 
     let token_c = TokenClient::new(&env, &tok);
     assert_eq!(token_c.balance(&owner), 1_000);
-    assert_eq!(c.get_unclaimed(&pid, &tok), 0);
+    assert_eq!(c.get_unclaimed(&username, &tok), 0);
     assert_eq!(c.get_paid_to(&owner, &tok), 1_000);
 }
 
@@ -200,16 +199,16 @@ fn test_distribute_and_claim() {
     let c = client(&env, &cid);
     let owner = Address::generate(&env);
     let donor = Address::generate(&env);
-    let pid   = str(&env, "acme/my-lib");
+    let username = str(&env, "alice");
 
-    c.register_project(&owner, &pid);
+    c.register(&owner, &username);
     mint(&env, &tok, &donor, 500);
-    c.donate(&donor, &pid, &tok, &500, &None);
+    c.donate(&donor, &username, &tok, &500, &None);
 
-    let paid = c.distribute_and_claim(&owner, &pid, &tok, &None, &0);
+    let paid = c.distribute_and_claim(&owner, &username, &tok, &None, &0);
     assert_eq!(paid, 500);
-    assert_eq!(c.get_pool(&pid, &tok), 0);
-    assert_eq!(c.get_unclaimed(&pid, &tok), 0);
+    assert_eq!(c.get_pool(&username, &tok), 0);
+    assert_eq!(c.get_unclaimed(&username, &tok), 0);
 }
 
 #[test]
@@ -219,65 +218,27 @@ fn test_min_distribution_skips_dust() {
     let owner1 = Address::generate(&env);
     let owner2 = Address::generate(&env);
     let donor = Address::generate(&env);
-    let pid1 = str(&env, "acme/parent");
-    let pid2 = str(&env, "deps/child");
+    let user1 = str(&env, "alice");
+    let user2 = str(&env, "bob");
 
-    c.register_project(&owner1, &pid1);
-    c.register_project(&owner2, &pid2);
+    c.register(&owner1, &user1);
+    c.register(&owner2, &user2);
 
-    // Parent forwards 40% to child
+    // alice forwards 40% to bob
     let mut rules = Map::new(&env);
-    rules.set(pid2.clone(), 4000u32); // 40% in BPS
-    c.set_rules(&owner1, &pid1, &rules);
+    rules.set(user2.clone(), 4000u32); // 40% in BPS
+    c.set_rules(&owner1, &user1, &rules);
 
-    // Donate 100 to parent
+    // Donate 100 to alice
     mint(&env, &tok, &donor, 100);
-    c.donate(&donor, &pid1, &tok, &100, &None);
+    c.donate(&donor, &user1, &tok, &100, &None);
 
     // Distribute with min_distribution = 50
-    // 40% of 100 = 40, which is below 50, so child gets nothing
-    c.distribute(&pid1, &tok, &50);
+    // 40% of 100 = 40, which is below 50, so bob gets nothing
+    c.distribute(&user1, &tok, &50);
 
-    // Child's pool should be 0 (share was below threshold)
-    assert_eq!(c.get_pool(&pid2, &tok), 0);
+    // Bob's pool should be 0 (share was below threshold)
+    assert_eq!(c.get_pool(&user2, &tok), 0);
     // Owner keeps everything (100 instead of 60)
-    assert_eq!(c.get_unclaimed(&pid1, &tok), 100);
-}
-
-#[test]
-fn test_set_nickname() {
-    let (env, cid, _tok) = setup();
-    let c = client(&env, &cid);
-    let user = Address::generate(&env);
-    let nick = str(&env, "alice");
-
-    c.set_nickname(&user, &nick);
-    assert_eq!(c.get_nickname(&user), Some(nick.clone()));
-    assert_eq!(c.get_nickname_owner(&nick), Some(user));
-}
-
-#[test]
-fn test_nickname_change_releases_old() {
-    let (env, cid, _tok) = setup();
-    let c = client(&env, &cid);
-    let user = Address::generate(&env);
-
-    c.set_nickname(&user, &str(&env, "alice"));
-    c.set_nickname(&user, &str(&env, "bob"));
-
-    assert_eq!(c.get_nickname_owner(&str(&env, "alice")), None);
-    assert_eq!(c.get_nickname(&user), Some(str(&env, "bob")));
-}
-
-#[test]
-#[should_panic]
-fn test_nickname_collision_fails() {
-    let (env, cid, _tok) = setup();
-    let c = client(&env, &cid);
-    let user1 = Address::generate(&env);
-    let user2 = Address::generate(&env);
-    let nick = str(&env, "alice");
-
-    c.set_nickname(&user1, &nick);
-    c.set_nickname(&user2, &nick);
+    assert_eq!(c.get_unclaimed(&user1, &tok), 100);
 }

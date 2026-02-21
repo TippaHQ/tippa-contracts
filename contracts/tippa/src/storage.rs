@@ -9,10 +9,10 @@ pub const BPS_BASE: u32 = 10_000;
 
 #[contracttype]
 #[derive(Clone)]
-pub struct DonorProjectKey {
-    pub donor:   Address,
-    pub project: String,
-    pub asset:   Address,
+pub struct DonorKey {
+    pub donor:    Address,
+    pub username: String,
+    pub asset:    Address,
 }
 
 #[contracttype]
@@ -22,14 +22,12 @@ pub enum DataKey {
     Rules(String),
     Pool(String, Address),
     TotalReceived(String, Address),
-    TotalReceivedFromProjects(String, Address),
+    TotalReceivedFromOthers(String, Address),
     Unclaimed(String, Address),
-    DonorToProject(DonorProjectKey),
+    DonorToUser(DonorKey),
     DonorTotal(Address, Address),
     GrandTotal(Address),
     PaidTo(Address, Address),
-    Nickname(Address),
-    NicknameOwner(String),
 }
 
 pub fn storage_add(env: &Env, key: &DataKey, amount: i128) {

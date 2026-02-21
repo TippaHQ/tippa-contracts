@@ -2,11 +2,11 @@ use soroban_sdk::{contract, contractimpl, token, Address, Env, Map, String};
 
 use crate::errors::Error;
 use crate::events::{
-    emit_claimed, emit_distributed, emit_donated, emit_nickname_set,
-    emit_ownership_transferred, emit_project_registered, emit_rules_set,
+    emit_claimed, emit_distributed, emit_donated, emit_ownership_transferred, emit_registered,
+    emit_rules_set,
 };
 use crate::storage::{
-    storage_add, DataKey, DonorProjectKey, BPS_BASE, LEDGERS_PER_YEAR, MAX_RULES, TTL_THRESHOLD,
+    storage_add, DataKey, DonorKey, BPS_BASE, LEDGERS_PER_YEAR, MAX_RULES, TTL_THRESHOLD,
 };
 
 #[contract]
@@ -14,16 +14,16 @@ pub struct CascadingDonations;
 
 #[contractimpl]
 impl CascadingDonations {
-    pub fn register_project(
+    pub fn register(
         env: Env,
         caller: Address,
-        project_id: String,
+        username: String,
     ) -> Result<(), Error> {
         caller.require_auth();
 
-        let owner_key = DataKey::Owner(project_id.clone());
+        let owner_key = DataKey::Owner(username.clone());
         if env.storage().persistent().has(&owner_key) {
-            return Err(Error::ProjectAlreadyExists);
+            return Err(Error::UsernameAlreadyTaken);
         }
 
         env.storage().persistent().set(&owner_key, &caller);
@@ -31,7 +31,7 @@ impl CascadingDonations {
             .persistent()
             .extend_ttl(&owner_key, TTL_THRESHOLD, LEDGERS_PER_YEAR);
 
-        let rules_key = DataKey::Rules(project_id.clone());
+        let rules_key = DataKey::Rules(username.clone());
         env.storage()
             .persistent()
             .set(&rules_key, &Map::<String, u32>::new(&env));
@@ -39,53 +39,53 @@ impl CascadingDonations {
             .persistent()
             .extend_ttl(&rules_key, TTL_THRESHOLD, LEDGERS_PER_YEAR);
 
-        emit_project_registered(&env, &project_id, &caller);
+        emit_registered(&env, &username, &caller);
         Ok(())
     }
 
     pub fn transfer_ownership(
         env: Env,
         caller: Address,
-        project_id: String,
+        username: String,
         new_owner: Address,
     ) -> Result<(), Error> {
         caller.require_auth();
-        Self::assert_owner(&env, &caller, &project_id)?;
+        Self::assert_owner(&env, &caller, &username)?;
 
-        let owner_key = DataKey::Owner(project_id.clone());
+        let owner_key = DataKey::Owner(username.clone());
         env.storage().persistent().set(&owner_key, &new_owner);
         env.storage()
             .persistent()
             .extend_ttl(&owner_key, TTL_THRESHOLD, LEDGERS_PER_YEAR);
 
-        emit_ownership_transferred(&env, &project_id, &caller, &new_owner);
+        emit_ownership_transferred(&env, &username, &caller, &new_owner);
         Ok(())
     }
 
     pub fn set_rules(
         env: Env,
         caller: Address,
-        project_id: String,
+        username: String,
         rules: Map<String, u32>,
     ) -> Result<(), Error> {
         caller.require_auth();
-        Self::assert_owner(&env, &caller, &project_id)?;
-        Self::validate_rules(&env, &rules, &project_id)?;
+        Self::assert_owner(&env, &caller, &username)?;
+        Self::validate_rules(&env, &rules, &username)?;
 
-        let rules_key = DataKey::Rules(project_id.clone());
+        let rules_key = DataKey::Rules(username.clone());
         env.storage().persistent().set(&rules_key, &rules);
         env.storage()
             .persistent()
             .extend_ttl(&rules_key, TTL_THRESHOLD, LEDGERS_PER_YEAR);
 
-        emit_rules_set(&env, &project_id, &rules);
+        emit_rules_set(&env, &username, &rules);
         Ok(())
     }
 
     pub fn donate(
         env: Env,
         caller: Address,
-        project_id: String,
+        username: String,
         asset: Address,
         amount: i128,
         donor_override: Option<Address>,
@@ -99,9 +99,9 @@ impl CascadingDonations {
         if !env
             .storage()
             .persistent()
-            .has(&DataKey::Owner(project_id.clone()))
+            .has(&DataKey::Owner(username.clone()))
         {
-            return Err(Error::ProjectNotFound);
+            return Err(Error::UserNotFound);
         }
 
         let donor = donor_override.unwrap_or(caller.clone());
@@ -112,17 +112,17 @@ impl CascadingDonations {
             &amount,
         );
 
-        storage_add(&env, &DataKey::Pool(project_id.clone(), asset.clone()), amount);
+        storage_add(&env, &DataKey::Pool(username.clone(), asset.clone()), amount);
         storage_add(
             &env,
-            &DataKey::TotalReceived(project_id.clone(), asset.clone()),
+            &DataKey::TotalReceived(username.clone(), asset.clone()),
             amount,
         );
         storage_add(
             &env,
-            &DataKey::DonorToProject(DonorProjectKey {
+            &DataKey::DonorToUser(DonorKey {
                 donor: donor.clone(),
-                project: project_id.clone(),
+                username: username.clone(),
                 asset: asset.clone(),
             }),
             amount,
@@ -130,43 +130,43 @@ impl CascadingDonations {
         storage_add(&env, &DataKey::DonorTotal(donor.clone(), asset.clone()), amount);
         storage_add(&env, &DataKey::GrandTotal(asset.clone()), amount);
 
-        emit_donated(&env, &project_id, &donor, &asset, amount);
+        emit_donated(&env, &username, &donor, &asset, amount);
         Ok(())
     }
 
     /// `min_distribution`: smallest amount worth forwarding (in token stroops).
     /// Shares below this threshold stay with the owner instead of cascading.
     /// Pass 0 to disable the threshold.
-    pub fn distribute(env: Env, project_id: String, asset: Address, min_distribution: i128) -> Result<(), Error> {
-        Self::distribute_internal(&env, &project_id, &asset, min_distribution)
+    pub fn distribute(env: Env, username: String, asset: Address, min_distribution: i128) -> Result<(), Error> {
+        Self::distribute_internal(&env, &username, &asset, min_distribution)
     }
 
     pub fn claim(
         env: Env,
         caller: Address,
-        project_id: String,
+        username: String,
         asset: Address,
         to: Option<Address>,
     ) -> Result<i128, Error> {
         caller.require_auth();
-        Self::assert_owner(&env, &caller, &project_id)?;
-        Self::do_claim(&env, &caller, &project_id, &asset, to)
+        Self::assert_owner(&env, &caller, &username)?;
+        Self::do_claim(&env, &caller, &username, &asset, to)
     }
 
     pub fn distribute_and_claim(
         env: Env,
         caller: Address,
-        project_id: String,
+        username: String,
         asset: Address,
         to: Option<Address>,
         min_distribution: i128,
     ) -> Result<i128, Error> {
         caller.require_auth();
-        Self::assert_owner(&env, &caller, &project_id)?;
+        Self::assert_owner(&env, &caller, &username)?;
 
-        Self::distribute_internal(&env, &project_id, &asset, min_distribution)?;
+        Self::distribute_internal(&env, &username, &asset, min_distribution)?;
 
-        let unclaimed_key = DataKey::Unclaimed(project_id.clone(), asset.clone());
+        let unclaimed_key = DataKey::Unclaimed(username.clone(), asset.clone());
         let unclaimed: i128 = env
             .storage()
             .persistent()
@@ -177,97 +177,65 @@ impl CascadingDonations {
             return Ok(0);
         }
 
-        Self::do_claim(&env, &caller, &project_id, &asset, to)
+        Self::do_claim(&env, &caller, &username, &asset, to)
     }
 
-    pub fn set_nickname(env: Env, caller: Address, nickname: String) -> Result<(), Error> {
-        caller.require_auth();
-
-        let owner_key = DataKey::NicknameOwner(nickname.clone());
-        if env.storage().persistent().has(&owner_key) {
-            return Err(Error::NicknameAlreadyTaken);
-        }
-
-        let nick_key = DataKey::Nickname(caller.clone());
-        if let Some(old) = env
-            .storage()
-            .persistent()
-            .get::<DataKey, String>(&nick_key)
-        {
-            env.storage()
-                .persistent()
-                .remove(&DataKey::NicknameOwner(old));
-        }
-
-        env.storage().persistent().set(&nick_key, &nickname);
+    pub fn get_pool(env: Env, username: String, asset: Address) -> i128 {
         env.storage()
             .persistent()
-            .extend_ttl(&nick_key, TTL_THRESHOLD, LEDGERS_PER_YEAR);
-        env.storage().persistent().set(&owner_key, &caller);
-        env.storage()
-            .persistent()
-            .extend_ttl(&owner_key, TTL_THRESHOLD, LEDGERS_PER_YEAR);
-
-        emit_nickname_set(&env, &caller, &nickname);
-        Ok(())
-    }
-
-    pub fn get_pool(env: Env, project_id: String, asset: Address) -> i128 {
-        env.storage()
-            .persistent()
-            .get(&DataKey::Pool(project_id, asset))
+            .get(&DataKey::Pool(username, asset))
             .unwrap_or(0)
     }
 
-    pub fn get_rules(env: Env, project_id: String) -> Map<String, u32> {
+    pub fn get_rules(env: Env, username: String) -> Map<String, u32> {
         env.storage()
             .persistent()
-            .get(&DataKey::Rules(project_id))
+            .get(&DataKey::Rules(username))
             .unwrap_or(Map::new(&env))
     }
 
-    pub fn get_owner(env: Env, project_id: String) -> Option<Address> {
+    pub fn get_owner(env: Env, username: String) -> Option<Address> {
         env.storage()
             .persistent()
-            .get(&DataKey::Owner(project_id))
+            .get(&DataKey::Owner(username))
     }
 
-    pub fn get_total_received(env: Env, project_id: String, asset: Address) -> i128 {
+    pub fn get_total_received(env: Env, username: String, asset: Address) -> i128 {
         env.storage()
             .persistent()
-            .get(&DataKey::TotalReceived(project_id, asset))
+            .get(&DataKey::TotalReceived(username, asset))
             .unwrap_or(0)
     }
 
-    pub fn get_total_received_from_projects(
+    pub fn get_total_received_from_others(
         env: Env,
-        project_id: String,
+        username: String,
         asset: Address,
     ) -> i128 {
         env.storage()
             .persistent()
-            .get(&DataKey::TotalReceivedFromProjects(project_id, asset))
+            .get(&DataKey::TotalReceivedFromOthers(username, asset))
             .unwrap_or(0)
     }
 
-    pub fn get_unclaimed(env: Env, project_id: String, asset: Address) -> i128 {
+    pub fn get_unclaimed(env: Env, username: String, asset: Address) -> i128 {
         env.storage()
             .persistent()
-            .get(&DataKey::Unclaimed(project_id, asset))
+            .get(&DataKey::Unclaimed(username, asset))
             .unwrap_or(0)
     }
 
-    pub fn get_donor_to_project(
+    pub fn get_donor_to_user(
         env: Env,
         donor: Address,
-        project_id: String,
+        username: String,
         asset: Address,
     ) -> i128 {
         env.storage()
             .persistent()
-            .get(&DataKey::DonorToProject(DonorProjectKey {
+            .get(&DataKey::DonorToUser(DonorKey {
                 donor,
-                project: project_id,
+                username,
                 asset,
             }))
             .unwrap_or(0)
@@ -294,39 +262,27 @@ impl CascadingDonations {
             .unwrap_or(0)
     }
 
-    pub fn get_nickname(env: Env, address: Address) -> Option<String> {
-        env.storage()
-            .persistent()
-            .get(&DataKey::Nickname(address))
-    }
-
-    pub fn get_nickname_owner(env: Env, nickname: String) -> Option<Address> {
-        env.storage()
-            .persistent()
-            .get(&DataKey::NicknameOwner(nickname))
-    }
-
     fn distribute_internal(
         env: &Env,
-        project_id: &String,
+        username: &String,
         asset: &Address,
         min_distribution: i128,
     ) -> Result<(), Error> {
         if !env
             .storage()
             .persistent()
-            .has(&DataKey::Owner(project_id.clone()))
+            .has(&DataKey::Owner(username.clone()))
         {
-            return Err(Error::ProjectNotFound);
+            return Err(Error::UserNotFound);
         }
 
         let rules: Map<String, u32> = env
             .storage()
             .persistent()
-            .get(&DataKey::Rules(project_id.clone()))
+            .get(&DataKey::Rules(username.clone()))
             .ok_or(Error::RulesNotSet)?;
 
-        let pool_key = DataKey::Pool(project_id.clone(), asset.clone());
+        let pool_key = DataKey::Pool(username.clone(), asset.clone());
         let pool: i128 = env.storage().persistent().get(&pool_key).unwrap_or(0);
 
         if pool == 0 {
@@ -354,7 +310,7 @@ impl CascadingDonations {
             );
             storage_add(
                 env,
-                &DataKey::TotalReceivedFromProjects(recipient.clone(), asset.clone()),
+                &DataKey::TotalReceivedFromOthers(recipient.clone(), asset.clone()),
                 share,
             );
         }
@@ -363,25 +319,25 @@ impl CascadingDonations {
         if owner_share > 0 {
             storage_add(
                 env,
-                &DataKey::Unclaimed(project_id.clone(), asset.clone()),
+                &DataKey::Unclaimed(username.clone(), asset.clone()),
                 owner_share,
             );
         }
 
         env.storage().persistent().set(&pool_key, &0i128);
 
-        emit_distributed(env, project_id, asset, pool);
+        emit_distributed(env, username, asset, pool);
         Ok(())
     }
 
     fn do_claim(
         env: &Env,
         caller: &Address,
-        project_id: &String,
+        username: &String,
         asset: &Address,
         to: Option<Address>,
     ) -> Result<i128, Error> {
-        let unclaimed_key = DataKey::Unclaimed(project_id.clone(), asset.clone());
+        let unclaimed_key = DataKey::Unclaimed(username.clone(), asset.clone());
         let unclaimed: i128 = env
             .storage()
             .persistent()
@@ -403,16 +359,16 @@ impl CascadingDonations {
         storage_add(env, &DataKey::PaidTo(recipient.clone(), asset.clone()), unclaimed);
         env.storage().persistent().set(&unclaimed_key, &0i128);
 
-        emit_claimed(env, project_id, &recipient, asset, unclaimed);
+        emit_claimed(env, username, &recipient, asset, unclaimed);
         Ok(unclaimed)
     }
 
-    fn assert_owner(env: &Env, caller: &Address, project_id: &String) -> Result<(), Error> {
+    fn assert_owner(env: &Env, caller: &Address, username: &String) -> Result<(), Error> {
         let owner: Address = env
             .storage()
             .persistent()
-            .get(&DataKey::Owner(project_id.clone()))
-            .ok_or(Error::ProjectNotFound)?;
+            .get(&DataKey::Owner(username.clone()))
+            .ok_or(Error::UserNotFound)?;
 
         if owner != *caller {
             return Err(Error::NotOwner);
@@ -420,7 +376,7 @@ impl CascadingDonations {
         Ok(())
     }
 
-    fn validate_rules(env: &Env, rules: &Map<String, u32>, own_project: &String) -> Result<(), Error> {
+    fn validate_rules(env: &Env, rules: &Map<String, u32>, own_username: &String) -> Result<(), Error> {
         if rules.len() > MAX_RULES {
             return Err(Error::TooManyRules);
         }
@@ -431,7 +387,7 @@ impl CascadingDonations {
         for i in 0..keys.len() {
             let key = keys.get(i).unwrap();
 
-            if key == *own_project {
+            if key == *own_username {
                 return Err(Error::SelfReference);
             }
 
