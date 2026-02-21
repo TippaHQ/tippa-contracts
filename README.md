@@ -21,21 +21,21 @@
 Tippa lets anyone donate to a project using **any Stellar token**. Users register a **username** and configure **distribution rules** that automatically forward a percentage of every donation to other users they support. Those users can set their own rules too, creating a **cascade** of funding that flows through the entire ecosystem.
 
 ```
-                          donate 1000 XLM
+                         donate 1000 USDC
                                |
                           [ alice ]
                          rules: 40% ->
                                |
                     +----------+----------+
                     |                     |
-              600 XLM (owner)      400 XLM (pool)
+             600 USDC (owner)     400 USDC (pool)
                                          |
                                      [ bob ]
                                    rules: 20% ->
                                          |
                               +----------+----------+
                               |                     |
-                        320 XLM (owner)       80 XLM (pool)
+                       320 USDC (owner)      80 USDC (pool)
                                                     |
                                               [ carol ]
 ```
