@@ -218,6 +218,13 @@ impl CascadingDonations {
             .unwrap_or(0)
     }
 
+    pub fn get_total_forwarded(env: Env, username: String, asset: Address) -> i128 {
+        env.storage()
+            .persistent()
+            .get(&DataKey::TotalForwarded(username, asset))
+            .unwrap_or(0)
+    }
+
     pub fn get_unclaimed(env: Env, username: String, asset: Address) -> i128 {
         env.storage()
             .persistent()
@@ -312,6 +319,14 @@ impl CascadingDonations {
                 env,
                 &DataKey::TotalReceivedFromOthers(recipient.clone(), asset.clone()),
                 share,
+            );
+        }
+
+        if total_shared > 0 {
+            storage_add(
+                env,
+                &DataKey::TotalForwarded(username.clone(), asset.clone()),
+                total_shared,
             );
         }
 

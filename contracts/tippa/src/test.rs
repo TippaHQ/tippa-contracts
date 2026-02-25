@@ -139,6 +139,7 @@ fn test_distribute_no_rules_all_unclaimed() {
 
     assert_eq!(c.get_pool(&username, &tok), 0);
     assert_eq!(c.get_unclaimed(&username, &tok), 1_000);
+    assert_eq!(c.get_total_forwarded(&username, &tok), 0);
 }
 
 #[test]
@@ -169,6 +170,7 @@ fn test_distribute_with_cascade() {
     assert_eq!(c.get_pool(&user2, &tok), 400);
     assert_eq!(c.get_total_received(&user2, &tok), 400);
     assert_eq!(c.get_total_received_from_others(&user2, &tok), 400);
+    assert_eq!(c.get_total_forwarded(&user1, &tok), 400);
 }
 
 #[test]
@@ -241,4 +243,6 @@ fn test_min_distribution_skips_dust() {
     assert_eq!(c.get_pool(&user2, &tok), 0);
     // Owner keeps everything (100 instead of 60)
     assert_eq!(c.get_unclaimed(&user1, &tok), 100);
+    // Nothing forwarded since dust was skipped
+    assert_eq!(c.get_total_forwarded(&user1, &tok), 0);
 }

@@ -34,7 +34,7 @@ if (typeof window !== "undefined") {
 export const networks = {
   testnet: {
     networkPassphrase: "Test SDF Network ; September 2015",
-    contractId: "CA5VXIBSSD4DNM2LXJBMAEQM66VBQTZJE2ZLYWXYHDAB6N5RB27NKIMI",
+    contractId: "CBOW3YF5W46PNMJK33VFO2WD6MPK6XKZ5OJKF2UDBUNTQVJWFECPURIO",
   }
 } as const
 
@@ -52,7 +52,7 @@ export const Errors = {
   12: {message:"RecipientNotRegistered"}
 }
 
-export type DataKey = {tag: "Owner", values: readonly [string]} | {tag: "Rules", values: readonly [string]} | {tag: "Pool", values: readonly [string, string]} | {tag: "TotalReceived", values: readonly [string, string]} | {tag: "TotalReceivedFromOthers", values: readonly [string, string]} | {tag: "Unclaimed", values: readonly [string, string]} | {tag: "DonorToUser", values: readonly [DonorKey]} | {tag: "DonorTotal", values: readonly [string, string]} | {tag: "GrandTotal", values: readonly [string]} | {tag: "PaidTo", values: readonly [string, string]};
+export type DataKey = {tag: "Owner", values: readonly [string]} | {tag: "Rules", values: readonly [string]} | {tag: "Pool", values: readonly [string, string]} | {tag: "TotalReceived", values: readonly [string, string]} | {tag: "TotalReceivedFromOthers", values: readonly [string, string]} | {tag: "Unclaimed", values: readonly [string, string]} | {tag: "DonorToUser", values: readonly [DonorKey]} | {tag: "DonorTotal", values: readonly [string, string]} | {tag: "TotalForwarded", values: readonly [string, string]} | {tag: "GrandTotal", values: readonly [string]} | {tag: "PaidTo", values: readonly [string, string]};
 
 
 export interface DonorKey {
@@ -141,6 +141,11 @@ export interface Client {
   transfer_ownership: ({caller, username, new_owner}: {caller: string, username: string, new_owner: string}, options?: MethodOptions) => Promise<AssembledTransaction<Result<void>>>
 
   /**
+   * Construct and simulate a get_total_forwarded transaction. Returns an `AssembledTransaction` object which will have a `result` field containing the result of the simulation. If this transaction changes contract state, you will need to call `signAndSend()` on the returned object.
+   */
+  get_total_forwarded: ({username, asset}: {username: string, asset: string}, options?: MethodOptions) => Promise<AssembledTransaction<i128>>
+
+  /**
    * Construct and simulate a distribute_and_claim transaction. Returns an `AssembledTransaction` object which will have a `result` field containing the result of the simulation. If this transaction changes contract state, you will need to call `signAndSend()` on the returned object.
    */
   distribute_and_claim: ({caller, username, asset, to, min_distribution}: {caller: string, username: string, asset: string, to: Option<string>, min_distribution: i128}, options?: MethodOptions) => Promise<AssembledTransaction<Result<i128>>>
@@ -169,7 +174,7 @@ export class Client extends ContractClient {
   constructor(public readonly options: ContractClientOptions) {
     super(
       new ContractSpec([ "AAAABAAAAAAAAAAAAAAABUVycm9yAAAAAAAACwAAAAAAAAAMVXNlck5vdEZvdW5kAAAAAQAAAAAAAAAITm90T3duZXIAAAACAAAAAAAAAAxUb29NYW55UnVsZXMAAAADAAAAAAAAABRSdWxlc1RvdGFsRXhjZWVkc01heAAAAAQAAAAAAAAADVNlbGZSZWZlcmVuY2UAAAAAAAAFAAAAAAAAABFJbnZhbGlkUGVyY2VudGFnZQAAAAAAAAYAAAAAAAAAE05vdGhpbmdUb0Rpc3RyaWJ1dGUAAAAABwAAAAAAAAANSW52YWxpZEFtb3VudAAAAAAAAAkAAAAAAAAAFFVzZXJuYW1lQWxyZWFkeVRha2VuAAAACgAAAAAAAAALUnVsZXNOb3RTZXQAAAAACwAAAAAAAAAWUmVjaXBpZW50Tm90UmVnaXN0ZXJlZAAAAAAADA==",
-        "AAAAAgAAAAAAAAAAAAAAB0RhdGFLZXkAAAAACgAAAAEAAAAAAAAABU93bmVyAAAAAAAAAQAAABAAAAABAAAAAAAAAAVSdWxlcwAAAAAAAAEAAAAQAAAAAQAAAAAAAAAEUG9vbAAAAAIAAAAQAAAAEwAAAAEAAAAAAAAADVRvdGFsUmVjZWl2ZWQAAAAAAAACAAAAEAAAABMAAAABAAAAAAAAABdUb3RhbFJlY2VpdmVkRnJvbU90aGVycwAAAAACAAAAEAAAABMAAAABAAAAAAAAAAlVbmNsYWltZWQAAAAAAAACAAAAEAAAABMAAAABAAAAAAAAAAtEb25vclRvVXNlcgAAAAABAAAH0AAAAAhEb25vcktleQAAAAEAAAAAAAAACkRvbm9yVG90YWwAAAAAAAIAAAATAAAAEwAAAAEAAAAAAAAACkdyYW5kVG90YWwAAAAAAAEAAAATAAAAAQAAAAAAAAAGUGFpZFRvAAAAAAACAAAAEwAAABM=",
+        "AAAAAgAAAAAAAAAAAAAAB0RhdGFLZXkAAAAACwAAAAEAAAAAAAAABU93bmVyAAAAAAAAAQAAABAAAAABAAAAAAAAAAVSdWxlcwAAAAAAAAEAAAAQAAAAAQAAAAAAAAAEUG9vbAAAAAIAAAAQAAAAEwAAAAEAAAAAAAAADVRvdGFsUmVjZWl2ZWQAAAAAAAACAAAAEAAAABMAAAABAAAAAAAAABdUb3RhbFJlY2VpdmVkRnJvbU90aGVycwAAAAACAAAAEAAAABMAAAABAAAAAAAAAAlVbmNsYWltZWQAAAAAAAACAAAAEAAAABMAAAABAAAAAAAAAAtEb25vclRvVXNlcgAAAAABAAAH0AAAAAhEb25vcktleQAAAAEAAAAAAAAACkRvbm9yVG90YWwAAAAAAAIAAAATAAAAEwAAAAEAAAAAAAAADlRvdGFsRm9yd2FyZGVkAAAAAAACAAAAEAAAABMAAAABAAAAAAAAAApHcmFuZFRvdGFsAAAAAAABAAAAEwAAAAEAAAAAAAAABlBhaWRUbwAAAAAAAgAAABMAAAAT",
         "AAAAAQAAAAAAAAAAAAAACERvbm9yS2V5AAAAAwAAAAAAAAAFYXNzZXQAAAAAAAATAAAAAAAAAAVkb25vcgAAAAAAABMAAAAAAAAACHVzZXJuYW1lAAAAEA==",
         "AAAAAAAAAAAAAAAFY2xhaW0AAAAAAAAEAAAAAAAAAAZjYWxsZXIAAAAAABMAAAAAAAAACHVzZXJuYW1lAAAAEAAAAAAAAAAFYXNzZXQAAAAAAAATAAAAAAAAAAJ0bwAAAAAD6AAAABMAAAABAAAD6QAAAAsAAAAD",
         "AAAAAAAAAAAAAAAGZG9uYXRlAAAAAAAFAAAAAAAAAAZjYWxsZXIAAAAAABMAAAAAAAAACHVzZXJuYW1lAAAAEAAAAAAAAAAFYXNzZXQAAAAAAAATAAAAAAAAAAZhbW91bnQAAAAAAAsAAAAAAAAADmRvbm9yX292ZXJyaWRlAAAAAAPoAAAAEwAAAAEAAAPpAAAAAgAAAAM=",
@@ -186,6 +191,7 @@ export class Client extends ContractClient {
         "AAAAAAAAAAAAAAARZ2V0X2Rvbm9yX3RvX3VzZXIAAAAAAAADAAAAAAAAAAVkb25vcgAAAAAAABMAAAAAAAAACHVzZXJuYW1lAAAAEAAAAAAAAAAFYXNzZXQAAAAAAAATAAAAAQAAAAs=",
         "AAAAAAAAAAAAAAASZ2V0X3RvdGFsX3JlY2VpdmVkAAAAAAACAAAAAAAAAAh1c2VybmFtZQAAABAAAAAAAAAABWFzc2V0AAAAAAAAEwAAAAEAAAAL",
         "AAAAAAAAAAAAAAASdHJhbnNmZXJfb3duZXJzaGlwAAAAAAADAAAAAAAAAAZjYWxsZXIAAAAAABMAAAAAAAAACHVzZXJuYW1lAAAAEAAAAAAAAAAJbmV3X293bmVyAAAAAAAAEwAAAAEAAAPpAAAAAgAAAAM=",
+        "AAAAAAAAAAAAAAATZ2V0X3RvdGFsX2ZvcndhcmRlZAAAAAACAAAAAAAAAAh1c2VybmFtZQAAABAAAAAAAAAABWFzc2V0AAAAAAAAEwAAAAEAAAAL",
         "AAAAAAAAAAAAAAAUZGlzdHJpYnV0ZV9hbmRfY2xhaW0AAAAFAAAAAAAAAAZjYWxsZXIAAAAAABMAAAAAAAAACHVzZXJuYW1lAAAAEAAAAAAAAAAFYXNzZXQAAAAAAAATAAAAAAAAAAJ0bwAAAAAD6AAAABMAAAAAAAAAEG1pbl9kaXN0cmlidXRpb24AAAALAAAAAQAAA+kAAAALAAAAAw==",
         "AAAAAAAAAAAAAAAeZ2V0X3RvdGFsX3JlY2VpdmVkX2Zyb21fb3RoZXJzAAAAAAACAAAAAAAAAAh1c2VybmFtZQAAABAAAAAAAAAABWFzc2V0AAAAAAAAEwAAAAEAAAAL" ]),
       options
@@ -207,6 +213,7 @@ export class Client extends ContractClient {
         get_donor_to_user: this.txFromJSON<i128>,
         get_total_received: this.txFromJSON<i128>,
         transfer_ownership: this.txFromJSON<Result<void>>,
+        get_total_forwarded: this.txFromJSON<i128>,
         distribute_and_claim: this.txFromJSON<Result<i128>>,
         get_total_received_from_others: this.txFromJSON<i128>
   }

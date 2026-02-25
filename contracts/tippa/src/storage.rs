@@ -26,6 +26,7 @@ pub enum DataKey {
     Unclaimed(String, Address),
     DonorToUser(DonorKey),
     DonorTotal(Address, Address),
+    TotalForwarded(String, Address),
     GrandTotal(Address),
     PaidTo(Address, Address),
 }
